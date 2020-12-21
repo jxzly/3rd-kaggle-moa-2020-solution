@@ -1,7 +1,7 @@
-1. putting dataset in ./data
+1. sh train.sh <input_dir>
 
-2. run daishu_solution.py, shiji_solution1.py, shiji_solution2.py, shiji_solution3.py
+   for example, sh train.sh "./data"
 
-3. run blend.py
+2. sh predict.sh <input_dir> <new_test_data_path> <output_dir>
 
-4. submission.csv is public dataset, you can upload model to kaggle to predict private dataset
+   for example, sh predict.sh "./data" "./data/test_features.csv" "./prediction"

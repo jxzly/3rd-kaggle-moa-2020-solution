@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import warnings
-import matplotlib.pyplot as plt
 import gc,os
 from time import time
 import datetime,random
@@ -17,6 +16,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset,TensorDataset, DataLoader,RandomSampler
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+import argparse
+
+def Parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument('--input_dir',
+                      default='./data', help='input data path of dataset')
+    args = args.parse_args()
+    return args
+
+args = Parse_args()
 
 warnings.simplefilter('ignore')
 
@@ -41,19 +50,19 @@ def Metric(labels,preds):
         metric += (-np.mean(labels[:,i]*np.log(np.maximum(preds[:,i],1e-15))+(1-labels[:,i])*np.log(np.maximum(1-preds[:,i],1e-15))))
     return metric/labels.shape[1]
 
-files = ['./data/test_features.csv',
-         './data/train_targets_scored.csv',
-         './data/train_features.csv',
-         './data/train_targets_nonscored.csv',
-         './data/train_drug.csv',
-         './data/sample_submission.csv']
+files = ['%s/test_features.csv'%args.input_dir,
+         '%s/train_targets_scored.csv'%args.input_dir,
+         '%s/train_features.csv'%args.input_dir,
+         '%s/train_targets_nonscored.csv'%args.input_dir,
+         '%s/train_drug.csv'%args.input_dir,
+         '%s/sample_submission.csv'%args.input_dir]
 
 test = pd.read_csv(files[0])
 train_target = pd.read_csv(files[1])
 train = pd.read_csv(files[2])
 train_nonscored = pd.read_csv(files[3])
 train_drug = pd.read_csv(files[4])
-sub = pd.read_csv('./data/sample_submission.csv')
+sub = pd.read_csv(files[5])
 
 genes = [col for col in train.columns if col.startswith("g-")]
 cells = [col for col in train.columns if col.startswith("c-")]
@@ -496,7 +505,7 @@ def train_and_predict(features, sub, aug,  folds=5, seed=817119,lr=1/90.0/3.5*3,
                 t_preds.extend(list(outputs.sigmoid().cpu().detach().numpy()))
             pred_mean = np.mean(t_preds)
             if valid_loss < best_valid_metric:
-                torch.save(model.state_dict(),'./model_dnn2_final_fold%s'%fold+'_'+str(seed)+'.ckpt')
+                torch.save(model.state_dict(),'./model/model_dnn2_final_fold%s'%fold+'_'+str(seed)+'.ckpt')
                 not_improve_epochs = 0
                 best_valid_metric = valid_loss
                 print('[epoch %s] lr: %.6f, train_loss: %.6f, valid_metric: %.6f, pred_mean:%.6f'%(epoch,optimizer.param_groups[0]['lr'],train_loss,valid_loss,pred_mean))
@@ -515,7 +524,7 @@ def train_and_predict(features, sub, aug,  folds=5, seed=817119,lr=1/90.0/3.5*3,
                 train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
 
 
-        state_dict = torch.load('./model_dnn2_final_fold%s'%fold+'_'+str(seed)+'.ckpt', torch.device("cuda" if torch.cuda.is_available() else "cpu") )
+        state_dict = torch.load('./model/model_dnn2_final_fold%s'%fold+'_'+str(seed)+'.ckpt', torch.device("cuda" if torch.cuda.is_available() else "cpu") )
         model.load_state_dict(state_dict)
         model.eval()
 

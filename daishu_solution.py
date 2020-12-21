@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import warnings
-import matplotlib.pyplot as plt
 import gc,os
 from time import time
 import datetime,random
@@ -17,6 +16,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset,TensorDataset, DataLoader,RandomSampler
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+import argparse
+
+def Parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument('--input_dir',
+                      default='./data', help='input data path of dataset')
+    args = args.parse_args()
+    return args
+
+args = Parse_args()
 
 warnings.simplefilter('ignore')
 
@@ -41,19 +50,19 @@ def Metric(labels,preds):
         metric += (-np.mean(labels[:,i]*np.log(np.maximum(preds[:,i],1e-15))+(1-labels[:,i])*np.log(np.maximum(1-preds[:,i],1e-15))))
     return metric/labels.shape[1]
 
-files = ['./data/test_features.csv',
-         './data/train_targets_scored.csv',
-         './data/train_features.csv',
-         './data/train_targets_nonscored.csv',
-         './data/train_drug.csv',
-         './data/sample_submission.csv']
+files = ['%s/test_features.csv'%args.input_dir,
+         '%s/train_targets_scored.csv'%args.input_dir,
+         '%s/train_features.csv'%args.input_dir,
+         '%s/train_targets_nonscored.csv'%args.input_dir,
+         '%s/train_drug.csv'%args.input_dir,
+         '%s/sample_submission.csv'%args.input_dir]
 
 test = pd.read_csv(files[0])
 train_target = pd.read_csv(files[1])
 train = pd.read_csv(files[2])
 train_nonscored = pd.read_csv(files[3])
 train_drug = pd.read_csv(files[4])
-sub = pd.read_csv('./data/sample_submission.csv')
+sub = pd.read_csv(files[5])
 
 drop_cols = ['g-513', 'g-370', 'g-707', 'g-300', 'g-130', 'g-375', 'g-161',
        'g-191', 'g-376', 'g-176', 'g-477', 'g-719', 'g-449', 'g-204',
@@ -176,7 +185,7 @@ class SmoothBCEwLogits(_WeightedLoss):
     def _smooth(targets:torch.Tensor, n_labels:int, smoothing=0.0):
         assert 0 <= smoothing < 1
         with torch.no_grad():
-            targets = targets * (1.0 - smoothing) + 0.5 * smoothing / 2
+            targets = targets * (1.0 - smoothing) + 0.5 * smoothing
         return targets
 
     def forward(self, inputs, targets):
@@ -484,7 +493,7 @@ class Dnn(nn.Module):
 
 device = ('cuda' if torch.cuda.is_available() else 'cpu')
 EPOCHS = 23
-def train_and_predict(features, sub, aug, mn,  folds=5, seed=817119):
+def train_and_predict(features, sub, aug, mn,  folds=5, seed=6):
     oof = train[['sig_id']]
     for t in targets:
         oof[t] = 0.0
@@ -517,12 +526,12 @@ def train_and_predict(features, sub, aug, mn,  folds=5, seed=817119):
             model = TabNet(len(features),len(targets),n_d=128,n_a=256,n_shared=1,n_ind=1,n_steps=3,relax=2.,vbs=128)
             optimizer = torch.optim.Adam(model.parameters(),betas=(0.9, 0.99), lr=1e-3, weight_decay=1.00e-5/5,eps=1e-5)
             scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer=optimizer, pct_start=0.1, div_factor=1e3,
-                                              max_lr=1/90.0/2.5, epochs=EPOCHS, steps_per_epoch=len(train_data_loader))
+                                              max_lr=1/90.0/3, epochs=EPOCHS, steps_per_epoch=len(train_data_loader))
         elif mn == 'attention_dnn':
             model = Attention_dnn(len(features),len(targets),256,1500,2,0.3)
-            optimizer = torch.optim.Adam(model.parameters(),betas=(0.9, 0.99), lr=1e-3, weight_decay=1.00e-5/3,eps=1e-5)
+            optimizer = torch.optim.Adam(model.parameters(),betas=(0.9, 0.99), lr=1e-3, weight_decay=1.00e-5/4.75,eps=1e-5)
             scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer=optimizer, pct_start=0.1, div_factor=1e3,
-                                              max_lr=1/90.0/3, epochs=EPOCHS, steps_per_epoch=len(train_data_loader))
+                                              max_lr=1/90.0/4, epochs=EPOCHS, steps_per_epoch=len(train_data_loader))
         else:
             model = Dnn(len(features),len(targets),1500)
             optimizer = torch.optim.Adam(model.parameters(),betas=(0.9, 0.99), lr=1e-3, weight_decay=1.00e-5/6,eps=1e-5)
@@ -584,7 +593,7 @@ def train_and_predict(features, sub, aug, mn,  folds=5, seed=817119):
                 t_preds.extend(list(outputs.sigmoid().cpu().detach().numpy()))
             pred_mean = np.mean(t_preds)
             if valid_loss < best_valid_metric:
-                torch.save(model.state_dict(),'./model_%s_seed%s_fold%s.ckpt'%(mn,seed,fold))
+                torch.save(model.state_dict(),'./model/model_%s_seed%s_fold%s.ckpt'%(mn,seed,fold))
                 not_improve_epochs = 0
                 best_valid_metric = valid_loss
                 print('[epoch %s] lr: %.6f, train_loss: %.6f, valid_metric: %.6f, valid_mean:%.6f, pred_mean:%.6f'%(epoch,optimizer.param_groups[0]['lr'],train_loss,valid_loss,valid_mean,pred_mean))
@@ -594,7 +603,7 @@ def train_and_predict(features, sub, aug, mn,  folds=5, seed=817119):
                 if not_improve_epochs >= 50:
                     break
             model.train()
-        state_dict = torch.load('./model_%s_seed%s_fold%s.ckpt'%(mn,seed,fold), torch.device("cuda" if torch.cuda.is_available() else "cpu") )
+        state_dict = torch.load('./model/model_%s_seed%s_fold%s.ckpt'%(mn,seed,fold), torch.device("cuda" if torch.cuda.is_available() else "cpu") )
         model.load_state_dict(state_dict)
         model.eval()
         train_preds = []
@@ -651,7 +660,7 @@ for i,output in enumerate(outputs):
 oof[targets] /= (1+len(outputs))
 sub[targets] /= (1+len(outputs))
 
-valid_metric = Metric(train_target[targets].values,dnn_oof[targets].values)
+valid_metric = Metric(train_target[targets].values,oof[targets].values)
 
 print('oof mean:%.6f,sub mean:%.6f,valid metric:%.6f'%(oof[targets].mean().mean(),sub[targets].mean().mean(),valid_metric))
 sub.loc[test['cp_type']=='ctl_vehicle',targets] = 0.0

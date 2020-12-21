@@ -1,0 +1,10 @@
+Anaconda3 version 3.5.2 or later is required
+
+Python packages are required as follow
+
+pandas='0.25.3'
+numpy='1.17.0'
+tqdm='4.46.1'
+sklearn='0.23.1'
+torch='1.5.0+cu101' or later
+iterstrat='0.1.6'

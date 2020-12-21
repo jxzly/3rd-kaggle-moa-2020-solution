@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import warnings
-import matplotlib.pyplot as plt
 import gc,os
 from time import time
 import datetime,random
@@ -17,6 +16,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset,TensorDataset, DataLoader,RandomSampler
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+import argparse
+
+def Parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument('--input_dir',
+                      default='./data', help='input data path of dataset')
+    args = args.parse_args()
+    return args
+
+args = Parse_args()
 
 warnings.simplefilter('ignore')
 
@@ -41,19 +50,19 @@ def Metric(labels,preds):
         metric += (-np.mean(labels[:,i]*np.log(np.maximum(preds[:,i],1e-15))+(1-labels[:,i])*np.log(np.maximum(1-preds[:,i],1e-15))))
     return metric/labels.shape[1]
 
-files = ['./data/test_features.csv',
-         './data/train_targets_scored.csv',
-         './data/train_features.csv',
-         './data/train_targets_nonscored.csv',
-         './data/train_drug.csv',
-         './data/sample_submission.csv']
+files = ['%s/test_features.csv'%args.input_dir,
+         '%s/train_targets_scored.csv'%args.input_dir,
+         '%s/train_features.csv'%args.input_dir,
+         '%s/train_targets_nonscored.csv'%args.input_dir,
+         '%s/train_drug.csv'%args.input_dir,
+         '%s/sample_submission.csv'%args.input_dir]
 
 test = pd.read_csv(files[0])
 train_target = pd.read_csv(files[1])
 train = pd.read_csv(files[2])
 train_nonscored = pd.read_csv(files[3])
 train_drug = pd.read_csv(files[4])
-sub = pd.read_csv('./data/sample_submission.csv')
+sub = pd.read_csv(files[5])
 
 genes = [col for col in train.columns if col.startswith("g-")]
 cells = [col for col in train.columns if col.startswith("c-")]
@@ -542,48 +551,6 @@ class TestDataset:
         }
         return dct
 
-def pl(test,ths=0.4):
-    test_target=pd.read_csv('./submission1811.csv')
-    test_target['p']=np.abs(test_target[targets].values-0.5).min(axis=1)
-    test_target[targets]=1*(test_target[targets].values>0.5)
-    test_target['p2']=test_target[targets].values.sum(axis=1)
-    ty=test_target[(test_target['p']>ths)&(test_target['p2']>=1)][targets].values
-    tx=test[(test_target['p']>ths)&(test_target['p2']>=1)][train_cols].values
-
-    test_raw=pd.read_csv('./test_features.csv')
-    ctl_aug=ctl_train.copy()
-    aug_test = []
-    aug_targets = []
-    for t in [24,48,72]:
-        for d in ['D1','D2']:
-            for _ in range(10):
-                train1 = test_raw[(test_target['p']>ths)&(test_target['p2']>=1)]
-                target1 = test_target[(test_target['p']>ths)&(test_target['p2']>=1)]
-                ctl1 = ctl_aug.loc[(ctl_aug['cp_time']==t)&(ctl_aug['cp_dose']==d)].sample(train1.shape[0],replace=True)
-                ctl2 = ctl_aug.loc[(ctl_aug['cp_time']==t)&(ctl_aug['cp_dose']==d)].sample(train1.shape[0],replace=True)
-                train1[genes+cells] = train1[genes+cells].values + ctl1[genes+cells].values - ctl2[genes+cells].values
-                aug_train = train1.merge(target1,how='left',on='sig_id')
-                aug_test.append(aug_train[['cp_time','cp_dose']+genes+cells])
-                aug_targets.append(aug_train[targets])
-    df = pd.concat(aug_test).reset_index(drop=True)
-    target = pd.concat(aug_targets).reset_index(drop=True)
-    for col in tqdm(genes+cells):
-        df[col] = transformers[col].transform(df[col].values.reshape(-1,1)).reshape(1,-1)[0]
-    pca_genes = gene_pca.transform(df[genes])
-    pca_cells = cell_pca.transform(df[cells])
-    pca_genes = pd.DataFrame(pca_genes, columns = [f"pca_g-{i}" for i in range(ncompo_genes)])
-    pca_cells = pd.DataFrame(pca_cells, columns = [f"pca_c-{i}" for i in range(ncompo_cells)])
-    df = pd.concat([df, pca_genes, pca_cells], axis = 1)
-    for col in ['cp_time','cp_dose']:
-        tmp = pd.get_dummies(df[col],prefix=col)
-        df = pd.concat([df,tmp],axis=1)
-        df.drop([col],axis=1,inplace=True)
-    xs = df[train_cols].values
-    ys = target[targets]
-    tx = np.concatenate([tx,xs],axis=0)
-    ty = np.concatenate([ty,ys],axis=0)
-    return tx,ty
-
 device = ('cuda' if torch.cuda.is_available() else 'cpu')
 EPOCHS1 = 29
 EPOCHS = 23
@@ -664,7 +631,7 @@ def train_and_predict(features, sub, aug,  folds=5, seed=817119,lr=1/90.0/3.5*3,
                 t_preds.extend(list(outputs.sigmoid().cpu().detach().numpy()))
             pred_mean = np.mean(t_preds)
             if valid_loss < best_valid_metric:
-                torch.save(model.state_dict(),'./model_resnet2_fold%s'%fold+'_'+str(seed)+'.ckpt')
+                torch.save(model.state_dict(),'./model/model_resnet2_fold%s'%fold+'_'+str(seed)+'.ckpt')
                 not_improve_epochs = 0
                 best_valid_metric = valid_loss
                 print('[epoch %s] lr: %.6f, train_loss: %.6f, valid_metric: %.6f, pred_mean:%.6f'%(epoch,optimizer.param_groups[0]['lr'],train_loss,valid_loss,pred_mean))
@@ -682,7 +649,7 @@ def train_and_predict(features, sub, aug,  folds=5, seed=817119,lr=1/90.0/3.5*3,
                 train_dataset = MoADataset(train_X_, train_Y_)
                 train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
 
-        state_dict = torch.load('./model_resnet2_fold%s'%fold+'_'+str(seed)+'.ckpt', torch.device("cuda" if torch.cuda.is_available() else "cpu") )
+        state_dict = torch.load('./model/model_resnet2_fold%s'%fold+'_'+str(seed)+'.ckpt', torch.device("cuda" if torch.cuda.is_available() else "cpu") )
         model.load_state_dict(state_dict)
         model.eval()
 
